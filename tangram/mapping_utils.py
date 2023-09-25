@@ -78,15 +78,19 @@ def pp_adatas(adata_sc, adata_sp, genes=None, gene_to_lowercase = True):
         )
     )
 
-    # Calculate uniform density prior as 1/number_of_spots
+    # 计算均匀密度先验，即1/spot数量
     adata_sp.obs["uniform_density"] = np.ones(adata_sp.X.shape[0]) / adata_sp.X.shape[0]
+
+    # 记录信息，指出均匀密度先验已计算并保存在空间AnnData的`obs``uniform_density`字段中
     logging.info(
         f"uniform based density prior is calculated and saved in `obs``uniform_density` of the spatial Anndata."
     )
 
-    # Calculate rna_count_based density prior as % of rna molecule count
+    # 计算基于RNA计数的密度先验，即每个spot中的rna count/所有spot中的rna count之和
     rna_count_per_spot = np.array(adata_sp.X.sum(axis=1)).squeeze()
     adata_sp.obs["rna_count_based_density"] = rna_count_per_spot / np.sum(rna_count_per_spot)
+
+    # 记录信息，指出基于RNA计数的密度先验已计算并保存在空间AnnData的`obs``rna_count_based_density`字段中
     logging.info(
         f"rna count based density prior is calculated and saved in `obs``rna_count_based_density` of the spatial Anndata."
     )
