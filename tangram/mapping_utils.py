@@ -158,7 +158,7 @@ def map_cells_to_space(
 ):
     """
     Map single cell data (`adata_sc`) on spatial data (`adata_sp`).
-    
+
     Args:
         adata_sc (AnnData): single cell data
         adata_sp (AnnData): gene spatial data
@@ -185,7 +185,40 @@ def map_cells_to_space(
         The `uns` field of the returned AnnData contains the training genes.
     """
 
+    """
+    将单细胞数据(`adata_sc`)映射到空间数据(`adata_sp`)。
+
+    参数:
+        - adata_sc (AnnData): 单细胞数据。
+        - adata_sp (AnnData): 基因空间数据。
+        - cv_train_genes (list): 可选。训练基因列表。默认为None。
+        - cluster_label (str): 可选。用于汇总单细胞数据的`adata_sc.obs`中的字段。仅适用于`mode=clusters`。
+        - mode (str): 可选。Tangram映射模式。当前支持的模式有：'cell'，'clusters'，'constrained'。默认为'cell'。
+        - device (string or torch.device): 可选。默认为'cpu'。
+        - learning_rate (float): 可选。优化器的学习率。默认为0.1。
+        - num_epochs (int): 可选。迭代轮数。默认为1000。
+        - scale (bool): 可选。是否根据每个簇中的细胞数量加权输入单细胞数据，仅当cluster_label不为None时有效。默认为True。
+        - lambda_d (float): 可选。优化器的密度项超参数。默认为0。
+        - lambda_g1 (float): 可选。优化器的基因-体素相似性项超参数。默认为1。
+        - lambda_g2 (float): 可选。优化器的体素-基因相似性项超参数。默认为0。
+        - lambda_r (float): 可选。熵正则化的强度。较高的熵促使每个细胞的概率分布在空间的狭窄部分中峰值。lambda_r = 0表示无熵正则化。默认为0。
+        - lambda_count (float): 可选。计数项的正则化器。仅当mode == 'constrained'时有效。默认为1。
+        - lambda_f_reg (float): 可选。过滤器的正则化器，促使过滤器中的值为布尔值（0和1）。仅当mode == 'constrained'时有效。默认为1。
+        - target_count (int): 可选。要过滤的细胞数量。默认为None。
+        - random_state (int): 可选。传递一个整数以复现训练。默认为None。
+        - verbose (bool): 可选。是否打印训练细节。默认为True。
+        - density_prior (str, ndarray or None): 斑点的空间密度，当为字符串时，值可以为'rna_count_based'或'uniform'，当为数组时，形状为(number_spots,)。该数组应满足约束条件sum() == 1。如果为None，则忽略密度项。默认值为'rna_count_based'。
+        
+    返回:
+        - 包含将细胞i映射到spotj的概率的 cell-spot AnnData。
+        - 返回的AnnData的`uns`字段包含训练基因。
+    """
+
+    """
+    参数检查
+    """
     # check invalid values for arguments
+    # 检查传递给函数的参数是否有效。
     if lambda_g1 == 0:
         raise ValueError("lambda_g1 cannot be 0.")
 
@@ -217,6 +250,7 @@ def map_cells_to_space(
         )
 
     # Check if training_genes key exist/is valid in adatas.uns
+    # 检查adatas.uns中是否存在/有效的training_genes键。
     if not set(["training_genes", "overlap_genes"]).issubset(set(adata_sc.uns.keys())):
         raise ValueError("Missing tangram parameters. Run `pp_adatas()`.")
 
@@ -225,7 +259,12 @@ def map_cells_to_space(
 
     assert list(adata_sp.uns["training_genes"]) == list(adata_sc.uns["training_genes"])
 
+
+    """
+     准备数据
+    """
     # get training_genes
+    # 获取训练基因
     if cv_train_genes is None:
         training_genes = adata_sc.uns["training_genes"]
     elif cv_train_genes is not None:
@@ -237,8 +276,12 @@ def map_cells_to_space(
             )
 
     logging.info("Allocate tensors for mapping.")
-    # Allocate tensors (AnnData matrix can be sparse or not)
 
+    """
+    
+    """
+    # Allocate tensors (AnnData matrix can be sparse or not)
+    # 分配张量（AnnData矩阵可以是稀疏的，也可以不是稀疏的）
     if isinstance(adata_sc.X, csc_matrix) or isinstance(adata_sc.X, csr_matrix):
         S = np.array(adata_sc[:, training_genes].X.toarray(), dtype="float32",)
     elif isinstance(adata_sc.X, np.ndarray):
@@ -247,7 +290,7 @@ def map_cells_to_space(
         X_type = type(adata_sc.X)
         logging.error("AnnData X has unrecognized type: {}".format(X_type))
         raise NotImplementedError
-
+    # 迷惑操作 ？？？
     if isinstance(adata_sp.X, csc_matrix) or isinstance(adata_sp.X, csr_matrix):
         G = np.array(adata_sp[:, training_genes].X.toarray(), dtype="float32")
     elif isinstance(adata_sp.X, np.ndarray):
@@ -263,6 +306,7 @@ def map_cells_to_space(
     d_source = None
 
     # define density_prior if 'rna_count_based' is passed to the density_prior argument:
+    # 如果将“rna_count_based”传递给density_prior参数，则定义density_prior：
     d_str = density_prior
     if type(density_prior) is np.ndarray:
         d_str = "customized"
@@ -271,6 +315,7 @@ def map_cells_to_space(
         density_prior = adata_sp.obs["rna_count_based_density"]
 
     # define density_prior if 'uniform' is passed to the density_prior argument:
+    # 如果将“uniform”传递给density_prior参数，则定义density_prior：
     elif density_prior == "uniform":
         density_prior = adata_sp.obs["uniform_density"]
 
@@ -290,14 +335,18 @@ def map_cells_to_space(
             lambda_d = 1
 
     # Choose device
+    # 选择设备
     device = torch.device(device)  # for gpu
 
     if verbose:
         print_each = 100
     else:
         print_each = None
-
+    """
+    训练映射模型
+    """
     if mode in ["cells", "clusters"]:
+        # 超参数
         hyperparameters = {
             "lambda_d": lambda_d,  # KL (ie density) term
             "lambda_g1": lambda_g1,  # gene-voxel cos sim
@@ -322,6 +371,7 @@ def map_cells_to_space(
         )
 
     # constrained mode
+    # 受限模式
     elif mode == "constrained":
         hyperparameters = {
             "lambda_d": lambda_d,  # KL (ie density) term
